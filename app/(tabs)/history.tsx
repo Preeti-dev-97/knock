@@ -1,6 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -34,6 +40,7 @@ type KnockItem = {
   direction: "sent" | "received";
   person_name: string;
   person_username: string | null;
+  knock_id: string;
 };
 
 type ProfileRow = {
@@ -122,6 +129,13 @@ export default function HistoryScreen() {
   const [error, setError] = useState("");
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<HistoryFilter>("all");
+  const { knockId } = useLocalSearchParams<{ knockId?: string }>();
+
+  const selectedKnockId = typeof knockId === "string" ? knockId : undefined;
+
+  const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+
+  const cardOffsets = useRef<Record<string, number>>({});
 
   const loadHistory = useCallback(async (refresh = false) => {
     if (refresh) {
@@ -248,6 +262,7 @@ export default function HistoryScreen() {
         return [
           {
             id: `${knock.id}:${row.id}`,
+            knock_id: knock.id,
             recipient_row_id: row.id,
             sender_id: knock.sender_id,
             recipient_id: row.recipient_id,
@@ -283,6 +298,7 @@ export default function HistoryScreen() {
         return [
           {
             id: `${knock.id}:${row.id}`,
+            knock_id: knock.id,
             recipient_row_id: row.id,
             sender_id: knock.sender_id,
             recipient_id: row.recipient_id,
@@ -315,6 +331,12 @@ export default function HistoryScreen() {
       setRefreshing(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (selectedKnockId) {
+      setFilter("all");
+    }
+  }, [selectedKnockId]);
 
   // Load history whenever this tab receives focus.
   useFocusEffect(
@@ -399,6 +421,29 @@ export default function HistoryScreen() {
 
     return items.filter((item) => item.direction === filter);
   }, [filter, items]);
+
+  useEffect(() => {
+    if (!selectedKnockId || loading) return;
+
+    const targetExists = items.some(
+      (item) => item.knock_id === selectedKnockId,
+    );
+
+    if (!targetExists) return;
+
+    const timeout = setTimeout(() => {
+      const offset = cardOffsets.current[selectedKnockId];
+
+      if (typeof offset === "number") {
+        scrollViewRef.current?.scrollTo({
+          y: Math.max(0, offset - 12),
+          animated: true,
+        });
+      }
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [selectedKnockId, items, loading]);
 
   return (
     <View style={styles.container}>
@@ -508,6 +553,7 @@ export default function HistoryScreen() {
       ) : (
         /* History list */
         <ScrollView
+          ref={scrollViewRef}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -526,7 +572,19 @@ export default function HistoryScreen() {
             const isAcknowledging = acknowledgingId === item.recipient_row_id;
 
             return (
-              <View key={item.id} style={styles.knockCard}>
+              <View
+                key={item.id}
+                onLayout={(event) => {
+                  const y = event.nativeEvent.layout.y;
+
+                  cardOffsets.current[item.knock_id] = y;
+                }}
+                style={[
+                  styles.knockCard,
+                  item.knock_id === selectedKnockId &&
+                    styles.knockCardHighlighted,
+                ]}
+              >
                 <View style={styles.cardTop}>
                   <View
                     style={[styles.cardIcon, isUrgent && styles.urgentIcon]}
@@ -859,5 +917,10 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 11,
     fontWeight: "800",
+  },
+  knockCardHighlighted: {
+    borderColor: COLORS.primary,
+    borderWidth: 2,
+    backgroundColor: "#8B5CF615",
   },
 });

@@ -2,9 +2,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { DarkTheme, ThemeProvider } from "@react-navigation/native";
 import { Session } from "@supabase/supabase-js";
 import { useFonts } from "expo-font";
+import * as Notifications from "expo-notifications";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { COLORS } from "../constants/theme";
@@ -20,10 +21,76 @@ export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
+  const [pendingKnockId, setPendingKnockId] = useState<string | null>(null);
+
+  const handledNotificationIds = useRef<Set<string>>(new Set());
+
   const [fontsLoaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
     ...Ionicons.font,
   });
+
+  const handleNotificationResponse = useCallback(
+    (response: Notifications.NotificationResponse) => {
+      const notificationId = response.notification.request.identifier;
+
+      if (handledNotificationIds.current.has(notificationId)) return;
+      handledNotificationIds.current.add(notificationId);
+
+      const data = response.notification.request.content.data;
+
+      const knockId =
+        data?.type === "knock" && typeof data?.knockId === "string"
+          ? data.knockId
+          : null;
+
+      void Notifications.clearLastNotificationResponseAsync().catch(
+        console.error,
+      );
+
+      if (knockId) setPendingKnockId(knockId);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      handleNotificationResponse,
+    );
+
+    // Also check whether the app was launched by tapping a notification.
+    void Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        if (response) {
+          handleNotificationResponse(response);
+        }
+      })
+      .catch(console.error);
+
+    return () => {
+      subscription.remove();
+    };
+  }, [handleNotificationResponse]);
+
+  useEffect(() => {
+    if (!pendingKnockId || !fontsLoaded || authLoading) {
+      return;
+    }
+
+    // Keep the notification pending until the user signs in.
+    if (!session) {
+      return;
+    }
+
+    router.push({
+      pathname: "/(tabs)/history",
+      params: {
+        knockId: pendingKnockId,
+      },
+    });
+
+    setPendingKnockId(null);
+  }, [pendingKnockId, session, authLoading, fontsLoaded, router]);
 
   useEffect(() => {
     let mounted = true;
@@ -57,14 +124,23 @@ export default function RootLayout() {
   useEffect(() => {
     if (!fontsLoaded || authLoading) return;
 
-    const inAuthScreen = segments[0] === "auth";
+    const currentRoute = segments[0];
 
-    if (!session && !inAuthScreen) {
+    const inAuthScreen = currentRoute === "auth";
+    const inResetPasswordScreen = currentRoute === "reset-password";
+
+    // Allow password recovery even without an existing session.
+    if (!session && !inAuthScreen && !inResetPasswordScreen) {
       router.replace("/auth");
-    } else if (session && inAuthScreen) {
+      return;
+    }
+
+    // Only redirect the regular auth screen after login.
+    // Never redirect away from the password reset screen.
+    if (session && inAuthScreen) {
       router.replace("/");
     }
-  }, [session, authLoading, fontsLoaded, segments]);
+  }, [session, authLoading, fontsLoaded, segments, router]);
 
   useEffect(() => {
     if (fontsLoaded && !authLoading) {
@@ -104,6 +180,7 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="auth" />
+        <Stack.Screen name="reset-password" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
           name="modal"

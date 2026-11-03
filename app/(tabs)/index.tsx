@@ -143,25 +143,34 @@ export default function HomeScreen() {
     setActivityError("");
 
     try {
+      // Check the locally stored session before making authenticated requests.
       const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
 
-      if (userError) throw userError;
-      if (!user) throw new Error("Please sign in to view your activity.");
+      if (sessionError) throw sessionError;
+
+      // User is logged out or the session is being cleared.
+      if (!session?.user) {
+        setActivities([]);
+        setActivityError("");
+        return;
+      }
+
+      const userId = session.user.id;
 
       // 1. Fetch Knocks sent by the current user.
       const { data: outgoingKnocks, error: outgoingError } = await supabase
         .from("knocks")
         .select("id, sender_id, alert, message, priority, created_at")
-        .eq("sender_id", user.id)
+        .eq("sender_id", userId)
         .order("created_at", { ascending: false })
         .limit(30);
 
       if (outgoingError) throw outgoingError;
 
-      // 2. Fetch recipient records for the sent Knocks.
+      // 2. Fetch recipient records for sent Knocks.
       const outgoingIds = (outgoingKnocks || []).map((item) => item.id);
 
       let outgoingRecipients: any[] = [];
@@ -178,13 +187,13 @@ export default function HomeScreen() {
         outgoingRecipients = data || [];
       }
 
-      // 3. Fetch Knocks received by the current user.
+      // 3. Fetch received Knocks.
       const { data: incomingRecipients, error: incomingError } = await supabase
         .from("knock_recipients")
         .select(
           "id, knock_id, recipient_id, status, created_at, acknowledged_at",
         )
-        .eq("recipient_id", user.id)
+        .eq("recipient_id", userId)
         .order("created_at", { ascending: false })
         .limit(30);
 
@@ -193,7 +202,7 @@ export default function HomeScreen() {
       const incomingRows = incomingRecipients || [];
       const incomingKnockIds = incomingRows.map((item) => item.knock_id);
 
-      // 4. Fetch parent Knocks for received recipient records.
+      // 4. Fetch parent Knocks for received records.
       let incomingKnocks: any[] = [];
 
       if (incomingKnockIds.length > 0) {
@@ -206,7 +215,7 @@ export default function HomeScreen() {
         incomingKnocks = data || [];
       }
 
-      // 5. Collect all profile IDs needed for the activity list.
+      // 5. Collect profile IDs.
       const profileIds = new Set<string>();
 
       outgoingRecipients.forEach((row) => {
@@ -217,7 +226,7 @@ export default function HomeScreen() {
         profileIds.add(row.sender_id);
       });
 
-      // 6. Fetch names and usernames.
+      // 6. Fetch profiles.
       let profiles: Profile[] = [];
 
       if (profileIds.size > 0) {
@@ -242,7 +251,7 @@ export default function HomeScreen() {
         incomingKnocks.map((knock) => [knock.id, knock]),
       );
 
-      // 7. Build outgoing activity items.
+      // 7. Build sent activity.
       const sentItems: ActivityItem[] = [];
 
       for (const row of outgoingRecipients) {
@@ -266,7 +275,7 @@ export default function HomeScreen() {
         });
       }
 
-      // 8. Build incoming activity items.
+      // 8. Build received activity.
       const receivedItems: ActivityItem[] = [];
 
       for (const row of incomingRows) {
@@ -290,14 +299,36 @@ export default function HomeScreen() {
         });
       }
 
-      // 9. Combine and sort by latest activity.
+      // 9. Combine and sort.
       const combined = [...sentItems, ...receivedItems].sort(
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
 
-      setActivities(combined.slice(0, 5));
+      // 10. Verify that the same user is still signed in.
+      // Prevents an old request from updating activity after logout/login.
+      const {
+        data: { session: currentSession },
+      } = await supabase.auth.getSession();
+
+      if (currentSession?.user?.id !== userId) {
+        setActivities([]);
+        return;
+      }
+
+      setActivities(combined);
     } catch (error: any) {
+      // Logging out can invalidate an in-progress Supabase request.
+      // This is expected and should not be displayed as an activity error.
+      if (
+        error?.name === "AuthSessionMissingError" ||
+        error?.message?.includes("Auth session missing")
+      ) {
+        setActivities([]);
+        setActivityError("");
+        return;
+      }
+
       console.error("Failed to load Home activity:", error);
       setActivityError(error?.message || "Unable to load recent activity.");
     } finally {
@@ -633,7 +664,7 @@ export default function HomeScreen() {
         </View>
       ) : (
         <View style={styles.activityList}>
-          {activities.map(renderActivity)}
+          {activities.slice(0, 2).map(renderActivity)}
         </View>
       )}
 

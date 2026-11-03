@@ -34,7 +34,6 @@ Deno.serve(async (req) => {
     }
 
     const payload = await req.json();
-
     const knockId = payload.record?.id;
 
     if (!knockId) {
@@ -117,9 +116,17 @@ Deno.serve(async (req) => {
       },
     }));
 
-    // Expo accepts batches of up to 100 messages.
     const invalidTokenIds: string[] = [];
+    const receiptRecords: {
+      ticket_id: string;
+      user_id: string;
+      expo_push_token: string;
+    }[] = [];
 
+    let successfulTicketCount = 0;
+    let failedTicketCount = 0;
+
+    // Expo accepts batches of up to 100 messages.
     for (let i = 0; i < messages.length; i += 100) {
       const batch = messages.slice(i, i + 100);
       const batchDevices = devices.slice(i, i + 100);
@@ -139,25 +146,69 @@ Deno.serve(async (req) => {
       }
 
       const result = await response.json();
+      const tickets = Array.isArray(result.data) ? result.data : [];
 
-      for (let j = 0; j < (result.data ?? []).length; j++) {
-        const ticket = result.data[j];
+      for (let j = 0; j < tickets.length; j++) {
+        const ticket = tickets[j];
+        const device = batchDevices[j];
 
-        if (
-          ticket.status === "error" &&
-          ticket.details?.error === "DeviceNotRegistered"
-        ) {
-          invalidTokenIds.push(batchDevices[j].id);
+        if (!device) continue;
+
+        if (ticket.status === "ok" && ticket.id) {
+          successfulTicketCount++;
+
+          // Save ticket for later receipt verification.
+          receiptRecords.push({
+            ticket_id: ticket.id,
+            user_id: device.user_id,
+            expo_push_token: device.expo_push_token,
+          });
+        } else {
+          failedTicketCount++;
+
+          const expoError = ticket.details?.error || "UnknownError";
+
+          console.error("Expo push ticket error:", {
+            userId: device.user_id,
+            error: expoError,
+            message: ticket.message,
+          });
+
+          if (expoError === "DeviceNotRegistered") {
+            invalidTokenIds.push(device.id);
+          }
         }
       }
     }
 
-    // Remove invalid tokens
+    // Remove tokens rejected immediately by Expo.
     if (invalidTokenIds.length > 0) {
-      await supabase
+      const { error: deleteError } = await supabase
         .from("user_push_tokens")
         .delete()
         .in("id", invalidTokenIds);
+
+      if (deleteError) {
+        console.error("Invalid token cleanup failed:", deleteError);
+      }
+    }
+
+    // Persist successful tickets for scheduled receipt checking.
+    let receiptTrackingSaved = true;
+
+    if (receiptRecords.length > 0) {
+      const { error: receiptError } = await supabase
+        .from("push_receipts")
+        .insert(receiptRecords);
+
+      if (receiptError) {
+        receiptTrackingSaved = false;
+
+        console.error(
+          "Push receipt tracking could not be saved:",
+          receiptError,
+        );
+      }
     }
 
     return Response.json({
@@ -165,6 +216,9 @@ Deno.serve(async (req) => {
       knockId,
       recipientCount: recipientIds.length,
       deviceCount: devices.length,
+      successfulTicketCount,
+      failedTicketCount,
+      receiptTrackingSaved,
     });
   } catch (error) {
     console.error("Knock notification error:", error);

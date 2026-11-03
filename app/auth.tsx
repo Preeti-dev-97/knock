@@ -140,6 +140,9 @@ export default function AuthScreen() {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(
         email.trim().toLowerCase(),
+        {
+          redirectTo: "knock://reset-password",
+        },
       );
 
       if (error) throw error;

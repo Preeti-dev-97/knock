@@ -1,2 +1,5 @@
 [functions.send-knock-notification]
 verify_jwt = false
+
+[functions.check-push-receipts]
+verify_jwt = false

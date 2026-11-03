@@ -21,7 +21,7 @@ export async function configureNotificationChannel() {
     name: "Knock Notifications",
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
-    sound: "default",
+    sound: undefined,
   });
 }
 
@@ -87,31 +87,23 @@ export async function registerPushNotifications(userId: string) {
 }
 
 export async function removePushToken() {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-    if (!user) return;
+  if (!user) return;
 
-    const projectId =
+  const response = await Notifications.getExpoPushTokenAsync({
+    projectId:
       Constants.easConfig?.projectId ??
-      Constants.expoConfig?.extra?.eas?.projectId;
+      Constants.expoConfig?.extra?.eas?.projectId,
+  });
 
-    if (!projectId) return;
+  const { error } = await supabase
+    .from("user_push_tokens")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("expo_push_token", response.data);
 
-    const response = await Notifications.getExpoPushTokenAsync({
-      projectId,
-    });
-
-    const { error } = await supabase
-      .from("user_push_tokens")
-      .delete()
-      .eq("user_id", user.id)
-      .eq("expo_push_token", response.data);
-
-    if (error) throw error;
-  } catch (error) {
-    console.error("Push token cleanup failed:", error);
-  }
+  if (error) throw error;
 }
