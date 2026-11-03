@@ -555,12 +555,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.greeting}>
-        <Text style={styles.greetingTitle}>Hey there 👋</Text>
-        <Text style={styles.greetingSubtitle}>
-          Someone needs to hear from you?
-        </Text>
-      </View>
+      <View style={styles.greeting}></View>
 
       <LinearGradient
         colors={["#6841C6", "#43248E", "#29165A"]}
@@ -614,11 +609,6 @@ export default function HomeScreen() {
               <Ionicons name={item.icon as any} size={23} color={item.color} />
             </View>
             <Text style={styles.alertTitle}>{item.title}</Text>
-            <Ionicons
-              name="arrow-up-right-box"
-              size={16}
-              color={COLORS.muted}
-            />
           </TouchableOpacity>
         ))}
       </View>
@@ -728,12 +718,6 @@ const styles = StyleSheet.create({
   },
 
   greeting: { marginTop: 34, marginBottom: 22 },
-  greetingTitle: { fontSize: 25, color: COLORS.text, fontWeight: "800" },
-  greetingSubtitle: {
-    color: COLORS.secondaryText,
-    fontSize: 14,
-    marginTop: 6,
-  },
 
   mainCard: {
     borderRadius: 26,
