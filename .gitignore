@@ -43,3 +43,5 @@ yarn-error.*
 .env
 
 knock-dabf4-firebase-adminsdk-fbsvc-52690dbf6b.json
+
+google-services.json
