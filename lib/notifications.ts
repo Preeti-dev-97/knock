@@ -17,12 +17,16 @@ Notifications.setNotificationHandler({
 export async function configureNotificationChannel() {
   if (Platform.OS !== "android") return;
 
-  await Notifications.setNotificationChannelAsync("knock-notifications", {
-    name: "Knock Notifications",
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 250, 250, 250],
-    sound: undefined,
-  });
+  try {
+    await Notifications.setNotificationChannelAsync("knock-notifications", {
+      name: "Knock Notifications",
+      importance: Notifications.AndroidImportance.MAX,
+    });
+
+    console.log("Notification channel configured successfully.");
+  } catch (error) {
+    console.error("Notification channel configuration failed:", error);
+  }
 }
 
 export async function registerPushNotifications(userId: string) {

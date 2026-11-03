@@ -472,33 +472,41 @@ export default function HomeScreen() {
           </Text>
 
           <View style={styles.activityBottomLine}>
-            <StatusBadge status={item.status} direction={item.direction} />
+            {isReceived ? (
+              isAcknowledged ? (
+                <StatusBadge status="acknowledged" direction="received" />
+              ) : (
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  disabled={isAcknowledging}
+                  style={[
+                    styles.acknowledgeButton,
+                    isAcknowledging && { opacity: 0.65 },
+                  ]}
+                  onPress={() => acknowledgeKnock(item)}
+                >
+                  {isAcknowledging ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="checkmark-circle-outline"
+                        size={16}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.acknowledgeText}>Acknowledge</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )
+            ) : (
+              <StatusBadge status={item.status} direction="sent" />
+            )}
+
             <Text style={styles.activityTime}>
               {getTimeAgo(item.createdAt)}
             </Text>
           </View>
-
-          {isReceived && !isAcknowledged && (
-            <TouchableOpacity
-              activeOpacity={0.8}
-              disabled={isAcknowledging}
-              style={styles.acknowledgeButton}
-              onPress={() => acknowledgeKnock(item)}
-            >
-              {isAcknowledging ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <>
-                  <Ionicons
-                    name="checkmark-circle-outline"
-                    size={16}
-                    color="#FFFFFF"
-                  />
-                  <Text style={styles.acknowledgeText}>Acknowledge</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
         </View>
       </TouchableOpacity>
     );
@@ -940,7 +948,6 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     paddingHorizontal: 11,
     paddingVertical: 7,
-    marginTop: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,

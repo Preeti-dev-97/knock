@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, {
   useCallback,
   useEffect,
@@ -41,6 +41,11 @@ type KnockItem = {
   person_name: string;
   person_username: string | null;
   knock_id: string;
+};
+
+type UnreadReplyCount = {
+  recipient_row_id: string;
+  unread_count: number;
 };
 
 type ProfileRow = {
@@ -130,6 +135,11 @@ export default function HistoryScreen() {
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<HistoryFilter>("all");
   const { knockId } = useLocalSearchParams<{ knockId?: string }>();
+  const router = useRouter();
+  const [clearing, setClearing] = useState(false);
+  const [unreadReplies, setUnreadReplies] = useState<Record<string, number>>(
+    {},
+  );
 
   const selectedKnockId = typeof knockId === "string" ? knockId : undefined;
 
@@ -159,6 +169,20 @@ export default function HistoryScreen() {
       }
 
       setCurrentUserId(user.id);
+
+      const { data: replyReads, error: replyReadsError } = await supabase
+        .from("knock_reply_reads")
+        .select("recipient_row_id, last_read_at")
+        .eq("user_id", user.id);
+
+      if (replyReadsError) throw replyReadsError;
+
+      const lastReadByRecipient = new Map(
+        (replyReads ?? []).map((row) => [
+          row.recipient_row_id,
+          row.last_read_at,
+        ]),
+      );
 
       // 1. Load Knocks sent by the current user.
       const { data: outgoingKnocks, error: outgoingError } = await supabase
@@ -322,7 +346,50 @@ export default function HistoryScreen() {
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       );
 
-      setItems(combined);
+      // Get activities previously cleared by this user.
+      const { data: hiddenActivities, error: hiddenError } = await supabase
+        .from("hidden_knock_activities")
+        .select("recipient_row_id")
+        .eq("user_id", user.id);
+
+      if (hiddenError) throw hiddenError;
+
+      const hiddenIds = new Set(
+        (hiddenActivities ?? []).map((row) => row.recipient_row_id),
+      );
+
+      // Hide cleared activities and keep only the latest 10.
+      const filteredItems = combined
+        .filter((item) => !hiddenIds.has(item.recipient_row_id))
+        .slice(0, 10);
+
+      const unreadCounts: Record<string, number> = {};
+
+      for (const item of combined) {
+        if (
+          !filteredItems.some(
+            (visible) => visible.recipient_row_id === item.recipient_row_id,
+          )
+        ) {
+          continue;
+        }
+
+        const lastReadAt = lastReadByRecipient.get(item.recipient_row_id);
+
+        const { data: replyRows, error: replyError } = await supabase
+          .from("knock_replies")
+          .select("id")
+          .eq("recipient_row_id", item.recipient_row_id)
+          .neq("sender_id", user.id)
+          .gt("created_at", lastReadAt ?? "1970-01-01T00:00:00.000Z");
+
+        if (replyError) throw replyError;
+
+        unreadCounts[item.recipient_row_id] = replyRows?.length ?? 0;
+      }
+
+      setUnreadReplies(unreadCounts);
+      setItems(filteredItems);
     } catch (loadError) {
       console.error("Failed to load Knock history:", loadError);
       setError(getErrorMessage(loadError));
@@ -373,6 +440,17 @@ export default function HistoryScreen() {
           void loadHistory(true);
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "knock_replies",
+        },
+        () => {
+          void loadHistory(true);
+        },
+      )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.warn("Knock history Realtime status:", status);
@@ -416,6 +494,74 @@ export default function HistoryScreen() {
     }
   };
 
+  const clearNotifications = async () => {
+    if (items.length === 0 || clearing) return;
+
+    const performClear = async () => {
+      setClearing(true);
+
+      try {
+        const { data: authData, error: authError } =
+          await supabase.auth.getUser();
+
+        if (authError) throw authError;
+
+        const user = authData.user;
+
+        if (!user) {
+          throw new Error("Please sign in again.");
+        }
+
+        const rows = items.map((item) => ({
+          user_id: user.id,
+          recipient_row_id: item.recipient_row_id,
+        }));
+
+        const { error: clearError } = await supabase
+          .from("hidden_knock_activities")
+          .upsert(rows, {
+            onConflict: "user_id,recipient_row_id",
+            ignoreDuplicates: true,
+          });
+
+        if (clearError) throw clearError;
+
+        setItems([]);
+      } catch (clearError) {
+        console.error("Failed to clear notifications:", clearError);
+
+        const message = getErrorMessage(clearError);
+
+        if (Platform.OS === "web" && typeof window !== "undefined") {
+          window.alert(`Couldn't clear notifications\n\n${message}`);
+        } else {
+          Alert.alert("Couldn't clear notifications", message);
+        }
+      } finally {
+        setClearing(false);
+      }
+    };
+
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      if (window.confirm("Clear all 10 displayed activity notifications?")) {
+        await performClear();
+      }
+    } else {
+      Alert.alert(
+        "Clear notifications",
+        "Remove all 10 displayed activity notifications from your history?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Clear",
+            style: "destructive",
+            onPress: () => void performClear(),
+          },
+        ],
+      );
+    }
+  };
+
   const visibleItems = useMemo(() => {
     if (filter === "all") return items;
 
@@ -448,8 +594,29 @@ export default function HistoryScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Activity</Text>
-        <Text style={styles.subtitle}>Every Knock, all in one place.</Text>
+        <View style={styles.headerTop}>
+          <View>
+            <Text style={styles.title}>Activity</Text>
+            <Text style={styles.subtitle}>Every Knock, all in one place.</Text>
+          </View>
+
+          <Pressable
+            onPress={() => void clearNotifications()}
+            disabled={items.length === 0 || clearing}
+            style={[
+              styles.clearButton,
+              (items.length === 0 || clearing) && styles.clearButtonDisabled,
+            ]}
+          >
+            {clearing ? (
+              <ActivityIndicator size="small" color={COLORS.danger} />
+            ) : (
+              <Ionicons name="trash-outline" size={15} color={COLORS.danger} />
+            )}
+
+            <Text style={styles.clearButtonText}>Clear</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Filters */}
@@ -630,28 +797,70 @@ export default function HistoryScreen() {
                 )}
 
                 <View style={styles.cardFooter}>
-                  <StatusBadge status={item.status} />
+                  {isReceived ? (
+                    canAcknowledge ? (
+                      <Pressable
+                        style={[
+                          styles.ackButton,
+                          isAcknowledging && styles.disabledButton,
+                        ]}
+                        onPress={() => void acknowledge(item)}
+                        disabled={acknowledgingId !== null}
+                        accessibilityRole="button"
+                        accessibilityLabel="Acknowledge received Knock"
+                      >
+                        {isAcknowledging ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <Ionicons
+                            name="checkmark"
+                            size={15}
+                            color="#FFFFFF"
+                          />
+                        )}
 
-                  {canAcknowledge && (
-                    <Pressable
-                      style={[
-                        styles.ackButton,
-                        isAcknowledging && styles.disabledButton,
-                      ]}
-                      onPress={() => void acknowledge(item)}
-                      disabled={acknowledgingId !== null}
-                      accessibilityRole="button"
-                      accessibilityLabel="Acknowledge received Knock"
-                    >
-                      {isAcknowledging ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Ionicons name="checkmark" size={15} color="#FFFFFF" />
-                      )}
-
-                      <Text style={styles.ackText}>Acknowledge</Text>
-                    </Pressable>
+                        <Text style={styles.ackText}>Acknowledge</Text>
+                      </Pressable>
+                    ) : (
+                      <StatusBadge status="acknowledged" />
+                    )
+                  ) : (
+                    <StatusBadge status={item.status} />
                   )}
+                  <Pressable
+                    style={styles.replyButton}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/knock-replies",
+                        params: {
+                          knockId: item.knock_id,
+                          recipientRowId: item.recipient_row_id,
+                          personName: item.person_name,
+                          canReply: "true",
+                        },
+                      })
+                    }
+                  >
+                    <View style={styles.replyButtonContent}>
+                      <Ionicons
+                        name="chatbubble-outline"
+                        size={15}
+                        color={COLORS.accent}
+                      />
+
+                      <Text style={styles.replyButtonText}>Replies</Text>
+
+                      {(unreadReplies[item.recipient_row_id] ?? 0) > 0 && (
+                        <View style={styles.unreadBadge}>
+                          <Text style={styles.unreadBadgeText}>
+                            {(unreadReplies[item.recipient_row_id] ?? 0) > 9
+                              ? "9+"
+                              : unreadReplies[item.recipient_row_id]}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </Pressable>
                 </View>
               </View>
             );
@@ -922,5 +1131,70 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
     borderWidth: 2,
     backgroundColor: "#8B5CF615",
+  },
+  replyButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+
+  replyButtonText: {
+    color: COLORS.accent,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  headerTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  clearButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: `${COLORS.danger}55`,
+    backgroundColor: `${COLORS.danger}12`,
+  },
+
+  clearButtonDisabled: {
+    opacity: 0.4,
+  },
+
+  clearButtonText: {
+    color: COLORS.danger,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  replyButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  unreadBadge: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    backgroundColor: COLORS.danger,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  unreadBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "900",
   },
 });
