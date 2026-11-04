@@ -9,7 +9,6 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   RefreshControl,
@@ -18,6 +17,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useKnockAlert } from "../../components/KnockAlert";
 import { COLORS } from "../../constants/theme";
 import { supabase } from "../../lib/supabase";
 
@@ -41,11 +41,6 @@ type KnockItem = {
   person_name: string;
   person_username: string | null;
   knock_id: string;
-};
-
-type UnreadReplyCount = {
-  recipient_row_id: string;
-  unread_count: number;
 };
 
 type ProfileRow = {
@@ -127,6 +122,8 @@ function StatusBadge({ status }: { status: RecipientStatus }) {
 }
 
 export default function HistoryScreen() {
+  const { showAlert, alertNode } = useKnockAlert();
+
   const [items, setItems] = useState<KnockItem[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -144,7 +141,6 @@ export default function HistoryScreen() {
   const selectedKnockId = typeof knockId === "string" ? knockId : undefined;
 
   const scrollViewRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
-
   const cardOffsets = useRef<Record<string, number>>({});
 
   const loadHistory = useCallback(async (refresh = false) => {
@@ -482,84 +478,77 @@ export default function HistoryScreen() {
     } catch (ackError) {
       console.error("Failed to acknowledge Knock:", ackError);
 
-      const message = getErrorMessage(ackError);
-
-      if (Platform.OS === "web" && typeof window !== "undefined") {
-        window.alert(`Couldn't acknowledge Knock\n\n${message}`);
-      } else {
-        Alert.alert("Couldn't acknowledge Knock", message);
-      }
+      showAlert({
+        title: "Couldn't acknowledge Knock",
+        message: getErrorMessage(ackError),
+        variant: "error",
+        buttonLabel: "Got it",
+      });
     } finally {
       setAcknowledgingId(null);
     }
   };
 
-  const clearNotifications = async () => {
+  // Actually clear the displayed activities.
+  const performClear = async () => {
+    setClearing(true);
+
+    try {
+      const { data: authData, error: authError } =
+        await supabase.auth.getUser();
+
+      if (authError) throw authError;
+
+      const user = authData.user;
+
+      if (!user) {
+        throw new Error("Please sign in again.");
+      }
+
+      const rows = items.map((item) => ({
+        user_id: user.id,
+        recipient_row_id: item.recipient_row_id,
+      }));
+
+      const { error: clearError } = await supabase
+        .from("hidden_knock_activities")
+        .upsert(rows, {
+          onConflict: "user_id,recipient_row_id",
+          ignoreDuplicates: true,
+        });
+
+      if (clearError) throw clearError;
+
+      setItems([]);
+    } catch (clearError) {
+      console.error("Failed to clear notifications:", clearError);
+
+      showAlert({
+        title: "Couldn't clear notifications",
+        message: getErrorMessage(clearError),
+        variant: "error",
+        buttonLabel: "Got it",
+      });
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  // Show the custom Knock confirmation before clearing.
+  const clearNotifications = () => {
     if (items.length === 0 || clearing) return;
 
-    const performClear = async () => {
-      setClearing(true);
-
-      try {
-        const { data: authData, error: authError } =
-          await supabase.auth.getUser();
-
-        if (authError) throw authError;
-
-        const user = authData.user;
-
-        if (!user) {
-          throw new Error("Please sign in again.");
-        }
-
-        const rows = items.map((item) => ({
-          user_id: user.id,
-          recipient_row_id: item.recipient_row_id,
-        }));
-
-        const { error: clearError } = await supabase
-          .from("hidden_knock_activities")
-          .upsert(rows, {
-            onConflict: "user_id,recipient_row_id",
-            ignoreDuplicates: true,
-          });
-
-        if (clearError) throw clearError;
-
-        setItems([]);
-      } catch (clearError) {
-        console.error("Failed to clear notifications:", clearError);
-
-        const message = getErrorMessage(clearError);
-
-        if (Platform.OS === "web" && typeof window !== "undefined") {
-          window.alert(`Couldn't clear notifications\n\n${message}`);
-        } else {
-          Alert.alert("Couldn't clear notifications", message);
-        }
-      } finally {
-        setClearing(false);
-      }
-    };
-
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      if (window.confirm("Clear all 10 displayed activity notifications?")) {
-        await performClear();
-      }
-    } else {
-      Alert.alert(
-        "Clear notifications",
-        "Remove all 10 displayed activity notifications from your history?",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Clear",
-            style: "destructive",
-            onPress: () => void performClear(),
-          },
-        ],
-      );
-    }
+    showAlert({
+      title: "Clear notifications?",
+      message:
+        "This will remove all 10 displayed activity notifications from your history. You can still receive new Knocks.",
+      variant: "warning",
+      buttonLabel: "Clear notifications",
+      dismissOnBackdrop: false,
+      onDone: () => {
+        void performClear();
+      },
+    });
   };
 
   const visibleItems = useMemo(() => {
@@ -601,7 +590,7 @@ export default function HistoryScreen() {
           </View>
 
           <Pressable
-            onPress={() => void clearNotifications()}
+            onPress={clearNotifications}
             disabled={items.length === 0 || clearing}
             style={[
               styles.clearButton,
@@ -743,7 +732,6 @@ export default function HistoryScreen() {
                 key={item.id}
                 onLayout={(event) => {
                   const y = event.nativeEvent.layout.y;
-
                   cardOffsets.current[item.knock_id] = y;
                 }}
                 style={[
@@ -827,6 +815,7 @@ export default function HistoryScreen() {
                   ) : (
                     <StatusBadge status={item.status} />
                   )}
+
                   <Pressable
                     style={styles.replyButton}
                     onPress={() =>
@@ -847,7 +836,6 @@ export default function HistoryScreen() {
                         size={15}
                         color={COLORS.accent}
                       />
-
                       <Text style={styles.replyButtonText}>Replies</Text>
 
                       {(unreadReplies[item.recipient_row_id] ?? 0) > 0 && (
@@ -861,12 +849,38 @@ export default function HistoryScreen() {
                       )}
                     </View>
                   </Pressable>
+
+                  {/* Knock Back — received Knocks only */}
+                  {isReceived && (
+                    <Pressable
+                      style={styles.knockBackButton}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/knock-back",
+                          params: {
+                            senderId: item.sender_id,
+                            senderName: item.person_name,
+                          },
+                        })
+                      }
+                    >
+                      <Ionicons
+                        name="return-up-back-outline"
+                        size={15}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.knockBackButtonText}>Knock Back</Text>
+                    </Pressable>
+                  )}
                 </View>
               </View>
             );
           })}
         </ScrollView>
       )}
+
+      {/* Shared Knock Alert */}
+      {alertNode}
     </View>
   );
 }
@@ -1127,11 +1141,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
   },
+
   knockCardHighlighted: {
     borderColor: COLORS.primary,
     borderWidth: 2,
     backgroundColor: "#8B5CF615",
   },
+
   replyButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1149,6 +1165,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
   },
+
   headerTop: {
     flexDirection: "row",
     alignItems: "center",
@@ -1176,6 +1193,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
   },
+
   replyButtonContent: {
     flexDirection: "row",
     alignItems: "center",
@@ -1196,5 +1214,21 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "900",
+  },
+  knockBackButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+
+  knockBackButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "800",
   },
 });

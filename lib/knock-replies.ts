@@ -1,4 +1,6 @@
+import * as Crypto from "expo-crypto";
 import * as ImagePicker from "expo-image-picker";
+import { Platform } from "react-native";
 import { supabase } from "./supabase";
 
 export type KnockReply = {
@@ -13,6 +15,10 @@ export type KnockReply = {
   sender_name?: string;
   media_url?: string | null;
 };
+
+// --------------------------------------------------
+// GET KNOCK REPLIES
+// --------------------------------------------------
 
 export async function getKnockReplies(knockId: string) {
   const { data, error } = await supabase
@@ -48,7 +54,7 @@ export async function getKnockReplies(knockId: string) {
     sender_name: profileMap.get(reply.sender_id) || "User",
   }));
 
-  // Generate secure URLs for image replies.
+  // Generate signed URLs for private image storage.
   return Promise.all(
     repliesWithNames.map(async (reply) => {
       if (reply.reply_type !== "image" || !reply.media_path) {
@@ -71,6 +77,10 @@ export async function getKnockReplies(knockId: string) {
     }),
   );
 }
+
+// --------------------------------------------------
+// SEND TEXT REPLY
+// --------------------------------------------------
 
 export async function sendTextReply({
   knockId,
@@ -113,6 +123,10 @@ export async function sendTextReply({
   return data as KnockReply;
 }
 
+// --------------------------------------------------
+// PICK REPLY IMAGE
+// --------------------------------------------------
+
 export async function pickReplyImage() {
   const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
@@ -122,7 +136,7 @@ export async function pickReplyImage() {
 
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images"],
-    allowsEditing: true,
+    allowsEditing: false,
     quality: 0.8,
   });
 
@@ -133,14 +147,20 @@ export async function pickReplyImage() {
   return result.assets[0];
 }
 
+// --------------------------------------------------
+// SEND IMAGE REPLY
+// --------------------------------------------------
+
 export async function sendImageReply({
   knockId,
   recipientRowId,
   imageUri,
+  mimeType,
 }: {
   knockId: string;
   recipientRowId: string;
   imageUri: string;
+  mimeType?: string | null;
 }) {
   const {
     data: { user },
@@ -151,31 +171,101 @@ export async function sendImageReply({
 
   if (!user) throw new Error("Please sign in again.");
 
-  const replyId = crypto.randomUUID();
+  const replyId = Crypto.randomUUID();
 
-  const extension = "jpg";
+  // Read the selected image using Expo FileSystem.
+  // Read image differently on web and native platforms.
+  let arrayBuffer: ArrayBuffer;
+  let detectedMimeType: string | null = mimeType ?? null;
+
+  if (Platform.OS === "web") {
+    // Browser image reading.
+    const response = await fetch(imageUri);
+
+    if (!response.ok) {
+      throw new Error("Couldn't access the selected image.");
+    }
+
+    const blob = await response.blob();
+
+    if (!blob.size) {
+      throw new Error("The selected image is empty.");
+    }
+
+    arrayBuffer = await blob.arrayBuffer();
+    detectedMimeType = detectedMimeType || blob.type || null;
+  } else {
+    // Android and iOS image reading.
+    const { File } = await import("expo-file-system");
+
+    const imageFile = new File(imageUri);
+
+    if (!imageFile.exists) {
+      throw new Error(
+        "The selected image could not be accessed. Please select another image.",
+      );
+    }
+
+    if (imageFile.size === 0) {
+      throw new Error("The selected image is empty.");
+    }
+
+    arrayBuffer = await imageFile.arrayBuffer();
+
+    detectedMimeType = detectedMimeType || imageFile.type || null;
+  }
+
+  if (!arrayBuffer.byteLength) {
+    throw new Error("Couldn't read the selected image. Please try another.");
+  }
+
+  // Determine image extension.
+  const uriExtension = imageUri.split("?")[0].split(".").pop()?.toLowerCase();
+
+  const extensionMimeTypes: Record<string, string> = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    heic: "image/heic",
+    heif: "image/heif",
+    gif: "image/gif",
+  };
+
+  // Determine actual content type.
+  const contentType =
+    detectedMimeType || extensionMimeTypes[uriExtension || ""] || "image/jpeg";
+
+  const extensionMap: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/heic": "heic",
+    "image/heif": "heif",
+    "image/gif": "gif",
+  };
+
+  const extension = extensionMap[contentType] || "jpg";
 
   const mediaPath = `${knockId}/${user.id}/${replyId}.${extension}`;
 
-  const response = await fetch(imageUri);
-  const imageBlob = await response.blob();
+  console.log("Uploading Knock image:", {
+    mediaPath,
+    contentType,
+    size: arrayBuffer.byteLength,
+  });
 
-  const contentType = imageBlob.type || "image/jpeg";
-
-  console.log("Storage path:", mediaPath);
-  console.log("Knock ID:", knockId);
-  console.log("User ID:", user.id);
-  console.log("Recipient row ID:", recipientRowId);
-
+  // Upload image to private Supabase Storage.
   const { error: uploadError } = await supabase.storage
     .from("knock-replies")
-    .upload(mediaPath, imageBlob, {
-      contentType: "image/jpeg",
+    .upload(mediaPath, arrayBuffer, {
+      contentType,
       upsert: false,
     });
 
   if (uploadError) throw uploadError;
 
+  // Save image reply in database.
   const { data, error } = await supabase
     .from("knock_replies")
     .insert({
@@ -189,14 +279,25 @@ export async function sendImageReply({
     .select()
     .single();
 
+  // Remove uploaded image if database insertion fails.
   if (error) {
-    // Remove uploaded media if the database insert fails.
-    await supabase.storage.from("knock-replies").remove([mediaPath]);
+    const { error: cleanupError } = await supabase.storage
+      .from("knock-replies")
+      .remove([mediaPath]);
+
+    if (cleanupError) {
+      console.error("Failed to clean up uploaded image:", cleanupError);
+    }
+
     throw error;
   }
 
   return data as KnockReply;
 }
+
+// --------------------------------------------------
+// MARK REPLIES AS READ
+// --------------------------------------------------
 
 export async function markKnockRepliesAsRead(recipientRowId: string) {
   const {
@@ -205,6 +306,7 @@ export async function markKnockRepliesAsRead(recipientRowId: string) {
   } = await supabase.auth.getUser();
 
   if (authError) throw authError;
+
   if (!user) throw new Error("Please sign in again.");
 
   const { error } = await supabase.from("knock_reply_reads").upsert(
@@ -219,4 +321,45 @@ export async function markKnockRepliesAsRead(recipientRowId: string) {
   );
 
   if (error) throw error;
+}
+
+export async function sendKnockBack(
+  originalSenderId: string,
+  message?: string,
+) {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError) throw userError;
+
+  if (!user) {
+    throw new Error("Your session has expired. Please sign in again.");
+  }
+
+  if (!originalSenderId || originalSenderId === user.id) {
+    throw new Error("Invalid Knock recipient.");
+  }
+
+  const trimmedMessage = message?.trim() ?? "";
+
+  if (trimmedMessage.length > 160) {
+    throw new Error("Your message cannot exceed 160 characters.");
+  }
+
+  const { data, error } = await supabase.rpc("send_knock", {
+    target_user_ids: [originalSenderId],
+    alert_text: "Knock Back",
+    custom_message: trimmedMessage || null,
+    knock_priority: "normal",
+  });
+
+  if (error) throw error;
+
+  if (!data) {
+    throw new Error("Your Knock Back could not be confirmed.");
+  }
+
+  return data;
 }

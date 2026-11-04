@@ -4,8 +4,6 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,19 +11,64 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useKnockAlert } from "../../components/KnockAlert";
 import { COLORS } from "../../constants/theme";
 import { supabase } from "../../lib/supabase";
 
 const quickAlerts = [
-  { id: "1", title: "Call me", icon: "call-outline", color: "#A78BFA" },
-  { id: "2", title: "Urgent", icon: "alert-circle-outline", color: "#FF5573" },
+  { id: "hello", title: "Hello", icon: "hand-left-outline", color: "#A78BFA" },
   {
-    id: "3",
+    id: "thinking",
+    title: "Thinking of you",
+    icon: "heart-outline",
+    color: "#EC4899",
+  },
+  {
+    id: "checking",
+    title: "Just checking in",
+    icon: "chatbubble-ellipses-outline",
+    color: "#F59E0B",
+  },
+  {
+    id: "asking",
+    title: "How are you?",
+    icon: "sparkles-outline",
+    color: "#A78BFA",
+  },
+
+  { id: "call", title: "Call me", icon: "call-outline", color: "#A78BFA" },
+  {
+    id: "phone",
     title: "Check phone",
     icon: "phone-portrait-outline",
     color: "#38BDF8",
   },
-  { id: "4", title: "Come here", icon: "location-outline", color: "#34D399" },
+  {
+    id: "where",
+    title: "Where are you?",
+    icon: "location-outline",
+    color: "#34D399",
+  },
+  { id: "way", title: "I'm on my way", icon: "walk-outline", color: "#22C55E" },
+  {
+    id: "help",
+    title: "Need help",
+    icon: "help-buoy-outline",
+    color: "#FF5573",
+  },
+  {
+    id: "come",
+    title: "Please come here",
+    icon: "navigate-outline",
+    color: "#34D399",
+  },
+  {
+    id: "important",
+    title: "Something important",
+    icon: "alert-circle-outline",
+    color: "#FF5573",
+  },
+  { id: "urgent", title: "Urgent", icon: "warning-outline", color: "#FF5573" },
 ];
 
 type ActivityItem = {
@@ -72,16 +115,6 @@ function getDisplayName(profile?: Profile) {
   return profile?.full_name || profile?.username || "Unknown user";
 }
 
-function showMessage(title: string, message: string) {
-  if (Platform.OS === "web") {
-    if (typeof window !== "undefined") {
-      window.alert(`${title}\n\n${message}`);
-    }
-  } else {
-    Alert.alert(title, message);
-  }
-}
-
 function StatusBadge({
   status,
   direction,
@@ -125,6 +158,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activityError, setActivityError] = useState("");
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
+  const { showAlert, alertNode } = useKnockAlert();
 
   const openSend = (alert?: string) => {
     router.push({
@@ -400,10 +434,11 @@ export default function HomeScreen() {
       await loadActivity(true);
     } catch (error: any) {
       console.error("Failed to acknowledge Knock:", error);
-      showMessage(
-        "Unable to acknowledge",
-        error?.message || "Please try again.",
-      );
+      showAlert({
+        title: "Unable to acknowledge",
+        message: error?.message || "Please try again.",
+        variant: "error",
+      });
     } finally {
       setAcknowledgingId(null);
     }
@@ -513,161 +548,171 @@ export default function HomeScreen() {
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => loadActivity(true)}
-          tintColor={COLORS.accent}
-          colors={[COLORS.primary]}
-        />
-      }
-    >
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.brand}>
-            knock<Text style={styles.brandDot}>.</Text>
-          </Text>
-          <Text style={styles.tagline}>Get their attention.</Text>
-        </View>
-
-        <TouchableOpacity
-          style={styles.notificationButton}
-          onPress={openHistory}
-        >
-          <Ionicons
-            name="notifications-outline"
-            size={23}
-            color={COLORS.text}
+    <>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadActivity(true)}
+            tintColor={COLORS.accent}
+            colors={[COLORS.primary]}
           />
-
-          {unreadCount > 0 && (
-            <View style={styles.notificationDot}>
-              <Text style={styles.notificationCount}>
-                {unreadCount > 9 ? "9+" : unreadCount}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.greeting}></View>
-
-      <LinearGradient
-        colors={["#6841C6", "#43248E", "#29165A"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.mainCard}
+        }
       >
-        <View style={styles.glowCircle} />
-
-        <View style={styles.cardTop}>
-          <View style={styles.cardIcon}>
-            <Ionicons name="hand-left" size={25} color="#FFFFFF" />
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.brand}>
+              knock<Text style={styles.brandDot}>.</Text>
+            </Text>
+            <Text style={styles.tagline}>Get their attention.</Text>
           </View>
-          <Text style={styles.cardLabel}>YOUR NEXT MOVE</Text>
-        </View>
 
-        <Text style={styles.cardTitle}>Ready to send{"\n"}a Knock?</Text>
-        <Text style={styles.cardDescription}>
-          Get someone's attention with just one tap.
-        </Text>
-
-        <TouchableOpacity
-          activeOpacity={0.85}
-          style={styles.sendButton}
-          onPress={() => openSend()}
-        >
-          <Text style={styles.sendButtonText}>Send a Knock</Text>
-          <Ionicons name="arrow-forward" size={19} color="#4C2A91" />
-        </TouchableOpacity>
-      </LinearGradient>
-
-      <View style={styles.sectionHeader}>
-        <View>
-          <Text style={styles.sectionTitle}>Quick alerts</Text>
-          <Text style={styles.sectionSubtitle}>Say it without typing</Text>
-        </View>
-        <Ionicons name="flash" size={20} color={COLORS.accent} />
-      </View>
-
-      <View style={styles.alertGrid}>
-        {quickAlerts.map((item) => (
           <TouchableOpacity
-            key={item.id}
-            activeOpacity={0.8}
-            style={styles.alertCard}
-            onPress={() => openSend(item.title)}
+            style={styles.notificationButton}
+            onPress={openHistory}
           >
-            <View
-              style={[styles.alertIcon, { backgroundColor: `${item.color}20` }]}
-            >
-              <Ionicons name={item.icon as any} size={23} color={item.color} />
-            </View>
-            <Text style={styles.alertTitle}>{item.title}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <View>
-          <Text style={styles.sectionTitle}>Recent activity</Text>
-          <Text style={styles.sectionSubtitle}>Your latest Knocks</Text>
-        </View>
-
-        <TouchableOpacity onPress={openHistory}>
-          <Text style={styles.viewAll}>View all</Text>
-        </TouchableOpacity>
-      </View>
-
-      {loadingActivity ? (
-        <View style={styles.loadingActivity}>
-          <ActivityIndicator size="small" color={COLORS.accent} />
-          <Text style={styles.loadingText}>Loading activity...</Text>
-        </View>
-      ) : activityError ? (
-        <View style={styles.emptyActivity}>
-          <Ionicons
-            name="cloud-offline-outline"
-            size={28}
-            color={COLORS.danger}
-          />
-          <Text style={styles.emptyTitle}>Couldn't load activity</Text>
-          <Text style={styles.emptyDescription}>{activityError}</Text>
-          <TouchableOpacity
-            style={styles.retryButton}
-            onPress={() => loadActivity()}
-          >
-            <Ionicons name="refresh" size={16} color="#FFFFFF" />
-            <Text style={styles.retryText}>Try again</Text>
-          </TouchableOpacity>
-        </View>
-      ) : activities.length === 0 ? (
-        <View style={styles.emptyActivity}>
-          <View style={styles.emptyIcon}>
             <Ionicons
               name="notifications-outline"
-              size={27}
-              color={COLORS.accent}
+              size={23}
+              color={COLORS.text}
             />
-          </View>
-          <Text style={styles.emptyTitle}>It's quiet here</Text>
-          <Text style={styles.emptyDescription}>
-            Your sent and received Knocks will appear here.
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.activityList}>
-          {activities.slice(0, 2).map(renderActivity)}
-        </View>
-      )}
 
-      <View style={{ height: 20 }} />
-    </ScrollView>
+            {unreadCount > 0 && (
+              <View style={styles.notificationDot}>
+                <Text style={styles.notificationCount}>
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.greeting}></View>
+
+        <LinearGradient
+          colors={["#6841C6", "#43248E", "#29165A"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.mainCard}
+        >
+          <View style={styles.glowCircle} />
+
+          <View style={styles.cardTop}>
+            <View style={styles.cardIcon}>
+              <Ionicons name="hand-left" size={25} color="#FFFFFF" />
+            </View>
+            <Text style={styles.cardLabel}>YOUR NEXT MOVE</Text>
+          </View>
+
+          <Text style={styles.cardTitle}>Ready to send{"\n"}a Knock?</Text>
+          <Text style={styles.cardDescription}>
+            Get someone's attention with just one tap.
+          </Text>
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={styles.sendButton}
+            onPress={() => openSend()}
+          >
+            <Text style={styles.sendButtonText}>Send a Knock</Text>
+            <Ionicons name="arrow-forward" size={19} color="#4C2A91" />
+          </TouchableOpacity>
+        </LinearGradient>
+
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionTitle}>Quick alerts</Text>
+            <Text style={styles.sectionSubtitle}>Say it without typing</Text>
+          </View>
+          <Ionicons name="flash" size={20} color={COLORS.accent} />
+        </View>
+
+        <View style={styles.alertGrid}>
+          {quickAlerts.map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              activeOpacity={0.8}
+              style={styles.alertCard}
+              onPress={() => openSend(item.title)}
+            >
+              <View
+                style={[
+                  styles.alertIcon,
+                  { backgroundColor: `${item.color}20` },
+                ]}
+              >
+                <Ionicons
+                  name={item.icon as any}
+                  size={23}
+                  color={item.color}
+                />
+              </View>
+              <Text style={styles.alertTitle}>{item.title}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionTitle}>Recent activity</Text>
+            <Text style={styles.sectionSubtitle}>Your latest Knocks</Text>
+          </View>
+
+          <TouchableOpacity onPress={openHistory}>
+            <Text style={styles.viewAll}>View all</Text>
+          </TouchableOpacity>
+        </View>
+
+        {loadingActivity ? (
+          <View style={styles.loadingActivity}>
+            <ActivityIndicator size="small" color={COLORS.accent} />
+            <Text style={styles.loadingText}>Loading activity...</Text>
+          </View>
+        ) : activityError ? (
+          <View style={styles.emptyActivity}>
+            <Ionicons
+              name="cloud-offline-outline"
+              size={28}
+              color={COLORS.danger}
+            />
+            <Text style={styles.emptyTitle}>Couldn't load activity</Text>
+            <Text style={styles.emptyDescription}>{activityError}</Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => loadActivity()}
+            >
+              <Ionicons name="refresh" size={16} color="#FFFFFF" />
+              <Text style={styles.retryText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : activities.length === 0 ? (
+          <View style={styles.emptyActivity}>
+            <View style={styles.emptyIcon}>
+              <Ionicons
+                name="notifications-outline"
+                size={27}
+                color={COLORS.accent}
+              />
+            </View>
+            <Text style={styles.emptyTitle}>It's quiet here</Text>
+            <Text style={styles.emptyDescription}>
+              Your sent and received Knocks will appear here.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.activityList}>
+            {activities.slice(0, 2).map(renderActivity)}
+          </View>
+        )}
+
+        <View style={{ height: 20 }} />
+      </ScrollView>
+      {alertNode}
+    </>
   );
 }
 

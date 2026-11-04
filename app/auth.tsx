@@ -1,23 +1,24 @@
-import { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
+import { useState } from "react";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { useKnockAlert } from "../components/KnockAlert";
 import { COLORS } from "../constants/theme";
 import { supabase } from "../lib/supabase";
 
 export default function AuthScreen() {
+  const { showAlert, alertNode } = useKnockAlert();
   const [isSignup, setIsSignup] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -37,34 +38,49 @@ export default function AuthScreen() {
 
     if (isSignup) {
       if (!fullName.trim()) {
-        Alert.alert("Required", "Please enter your full name.");
+        showAlert({
+          title: "Required",
+          message: "Please enter your full name.",
+          variant: "warning",
+        });
         return;
       }
 
       if (!/^[a-zA-Z0-9_]{3,20}$/.test(normalizedUsername)) {
-        Alert.alert(
-          "Invalid username",
-          "Username must be 3–20 characters and contain only letters, numbers or underscores.",
-        );
+        showAlert({
+          title: "Invalid username",
+          message:
+            "Username must be 3–20 characters and contain only letters, numbers or underscores.",
+          variant: "warning",
+        });
         return;
       }
     }
 
     if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
-      Alert.alert("Invalid email", "Please enter a valid email address.");
+      showAlert({
+        title: "Invalid email",
+        message: "Please enter a valid email address.",
+        variant: "warning",
+      });
       return;
     }
 
     if (password.length < 8) {
-      Alert.alert(
-        "Weak password",
-        "Password must contain at least 8 characters.",
-      );
+      showAlert({
+        title: "Weak password",
+        message: "Password must contain at least 8 characters.",
+        variant: "warning",
+      });
       return;
     }
 
     if (isSignup && password !== confirmPassword) {
-      Alert.alert("Password mismatch", "Your passwords do not match.");
+      showAlert({
+        title: "Password mismatch",
+        message: "Your passwords do not match.",
+        variant: "warning",
+      });
       return;
     }
 
@@ -82,7 +98,11 @@ export default function AuthScreen() {
         if (usernameError) throw usernameError;
 
         if (!available) {
-          Alert.alert("Username taken", "Please choose another username.");
+          showAlert({
+            title: "Username taken",
+            message: "Please choose another username.",
+            variant: "warning",
+          });
           return;
         }
 
@@ -100,14 +120,21 @@ export default function AuthScreen() {
         if (error) throw error;
 
         if (data.session) {
-          Alert.alert("Welcome to Knock!", "Your account has been created.");
-          router.replace("/(tabs)");
+          showAlert({
+            title: "Welcome to Knock!",
+            message: "Your account has been created.",
+            variant: "success",
+            onDone: () => router.replace("/(tabs)"),
+          });
         } else {
-          Alert.alert(
-            "Verify your email",
-            "Your account has been created. Please check your email to confirm your account, then sign in.",
-            [{ text: "OK", onPress: () => setIsSignup(false) }],
-          );
+          showAlert({
+            title: "Verify your email",
+            message:
+              "Your account has been created. Please check your email to confirm your account, then sign in.",
+            variant: "info",
+            buttonLabel: "OK",
+            onDone: () => setIsSignup(false),
+          });
         }
       } else {
         const { error } = await supabase.auth.signInWithPassword({
@@ -120,10 +147,11 @@ export default function AuthScreen() {
         router.replace("/(tabs)");
       }
     } catch (error: any) {
-      Alert.alert(
-        "Authentication failed",
-        error.message || "Something went wrong. Please try again.",
-      );
+      showAlert({
+        title: "Authentication failed",
+        message: error.message || "Something went wrong. Please try again.",
+        variant: "error",
+      });
     } finally {
       setLoading(false);
     }
@@ -131,7 +159,11 @@ export default function AuthScreen() {
 
   const handleForgotPassword = async () => {
     if (!email.trim() || !/^\S+@\S+\.\S+$/.test(email.trim())) {
-      Alert.alert("Enter email", "Please enter your registered email first.");
+      showAlert({
+        title: "Enter email",
+        message: "Please enter your registered email first.",
+        variant: "warning",
+      });
       return;
     }
 
@@ -147,12 +179,14 @@ export default function AuthScreen() {
 
       if (error) throw error;
 
-      Alert.alert(
-        "Password recovery",
-        "If an account exists for this email, a password reset link will be sent.",
-      );
+      showAlert({
+        title: "Password recovery",
+        message:
+          "If an account exists for this email, a password reset link will be sent.",
+        variant: "success",
+      });
     } catch (error: any) {
-      Alert.alert("Error", error.message);
+      showAlert({ title: "Error", message: error.message, variant: "error" });
     } finally {
       setLoading(false);
     }
@@ -389,6 +423,7 @@ export default function AuthScreen() {
 
         <View style={{ height: 25 }} />
       </ScrollView>
+      {alertNode}
     </KeyboardAvoidingView>
   );
 }

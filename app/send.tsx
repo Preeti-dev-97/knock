@@ -1,7 +1,9 @@
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -11,9 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
-import { router, useLocalSearchParams } from "expo-router";
+import { useKnockAlert } from "../components/KnockAlert";
 import { COLORS } from "../constants/theme";
 import { supabase } from "../lib/supabase";
 
@@ -25,11 +25,53 @@ type Contact = {
 
 type Priority = "normal" | "urgent";
 
-const alerts = [
-  { title: "Call me", icon: "call-outline", color: "#A78BFA" },
-  { title: "Urgent", icon: "alert-circle-outline", color: "#FF5573" },
-  { title: "Check phone", icon: "phone-portrait-outline", color: "#38BDF8" },
-  { title: "Come here", icon: "location-outline", color: "#34D399" },
+const alertGroups = [
+  {
+    category: "Social",
+    description: "Small moments and friendly check-ins",
+    alerts: [
+      { title: "Hello", icon: "hand-left-outline", color: "#A78BFA" },
+      { title: "Thinking of you", icon: "heart-outline", color: "#EC4899" },
+      {
+        title: "Just checking in",
+        icon: "chatbubble-ellipses-outline",
+        color: "#F59E0B",
+      },
+      {
+        title: "How are you?",
+        icon: "sparkles-outline",
+        color: "#A78BFA",
+      },
+    ],
+  },
+  {
+    category: "Action",
+    description: "When you need someone to do something",
+    alerts: [
+      { title: "Call me", icon: "call-outline", color: "#A78BFA" },
+      {
+        title: "Check phone",
+        icon: "phone-portrait-outline",
+        color: "#38BDF8",
+      },
+      { title: "Where are you?", icon: "location-outline", color: "#34D399" },
+      { title: "I'm on my way", icon: "walk-outline", color: "#22C55E" },
+    ],
+  },
+  {
+    category: "Help",
+    description: "Get attention when it matters",
+    alerts: [
+      { title: "Need help", icon: "help-circle-outline", color: "#FF5573" },
+      { title: "Please come here", icon: "navigate-outline", color: "#34D399" },
+      {
+        title: "Something important",
+        icon: "alert-circle-outline",
+        color: "#FF5573",
+      },
+      { title: "Urgent", icon: "warning-outline", color: "#FF5573" },
+    ],
+  },
 ];
 
 const avatarColors = [
@@ -48,16 +90,6 @@ function getInitials(name: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
-}
-
-function showMessage(title: string, message: string, onDone?: () => void) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.alert(`${title}\n\n${message}`);
-    onDone?.();
-    return;
-  }
-
-  Alert.alert(title, message, [{ text: "OK", onPress: onDone }]);
 }
 
 function getErrorMessage(error: unknown) {
@@ -88,6 +120,17 @@ export default function SendScreen() {
   const [priority, setPriority] = useState<Priority>("normal");
   const [search, setSearch] = useState("");
   const [sending, setSending] = useState(false);
+  const { showAlert, alertNode } = useKnockAlert();
+  const showMessage = (title: string, message: string, onDone?: () => void) => {
+    const lowerTitle = title.toLowerCase();
+    const variant =
+      lowerTitle.includes("sent") || lowerTitle.includes("success")
+        ? "success"
+        : lowerTitle.includes("couldn't") || lowerTitle.includes("unable")
+          ? "error"
+          : "info";
+    showAlert({ title, message, variant, onDone });
+  };
 
   const loadContacts = useCallback(async () => {
     setContactsLoading(true);
@@ -422,44 +465,55 @@ export default function SendScreen() {
           </View>
         </View>
 
-        <View style={styles.alertGrid}>
-          {alerts.map((alert) => {
-            const selected = selectedAlert === alert.title;
+        {alertGroups.map((group) => (
+          <View key={group.category} style={styles.alertGroup}>
+            <Text style={styles.alertCategory}>{group.category}</Text>
+            <Text style={styles.alertDescription}>{group.description}</Text>
+            <View style={styles.alertGrid}>
+              {group.alerts.map((alert) => {
+                const selected = selectedAlert === alert.title;
 
-            return (
-              <TouchableOpacity
-                key={alert.title}
-                activeOpacity={0.8}
-                style={[styles.alertCard, selected && styles.alertCardSelected]}
-                onPress={() => setSelectedAlert(selected ? "" : alert.title)}
-                disabled={sending}
-              >
-                <View
-                  style={[
-                    styles.alertIcon,
-                    { backgroundColor: `${alert.color}20` },
-                  ]}
-                >
-                  <Ionicons
-                    name={alert.icon as any}
-                    size={22}
-                    color={alert.color}
-                  />
-                </View>
+                return (
+                  <TouchableOpacity
+                    key={alert.title}
+                    activeOpacity={0.8}
+                    style={[
+                      styles.alertCard,
+                      selected && styles.alertCardSelected,
+                    ]}
+                    onPress={() =>
+                      setSelectedAlert(selected ? "" : alert.title)
+                    }
+                    disabled={sending}
+                  >
+                    <View
+                      style={[
+                        styles.alertIcon,
+                        { backgroundColor: `${alert.color}20` },
+                      ]}
+                    >
+                      <Ionicons
+                        name={alert.icon as any}
+                        size={22}
+                        color={alert.color}
+                      />
+                    </View>
 
-                <Text style={styles.alertTitle}>{alert.title}</Text>
+                    <Text style={styles.alertTitle}>{alert.title}</Text>
 
-                {selected && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={18}
-                    color={COLORS.accent}
-                  />
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                    {selected && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={18}
+                        color={COLORS.accent}
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        ))}
 
         <View style={styles.sectionHeader}>
           <View>
@@ -578,6 +632,8 @@ export default function SendScreen() {
 
         <View style={{ height: 30 }} />
       </ScrollView>
+
+      {alertNode}
     </KeyboardAvoidingView>
   );
 }
@@ -706,6 +762,18 @@ const styles = StyleSheet.create({
   contactInfo: { flex: 1, marginLeft: 12 },
   contactName: { color: COLORS.text, fontSize: 13, fontWeight: "700" },
   username: { color: COLORS.secondaryText, fontSize: 11, marginTop: 4 },
+  alertGroup: { marginBottom: 17 },
+  alertCategory: {
+    color: COLORS.text,
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 3,
+  },
+  alertDescription: {
+    color: COLORS.muted,
+    fontSize: 10,
+    marginBottom: 10,
+  },
   alertGrid: {
     flexDirection: "row",
     flexWrap: "wrap",

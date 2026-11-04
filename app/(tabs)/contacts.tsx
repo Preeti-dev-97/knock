@@ -13,6 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { COLORS } from "../../constants/theme";
+import { useKnockAlert } from "../../components/KnockAlert";
 
 type Profile = {
   id: string;
@@ -31,6 +32,8 @@ type FriendRequest = {
 type Tab = "contacts" | "requests";
 
 export default function ContactsScreen() {
+  const { showAlert, alertNode } = useKnockAlert();
+
   const [activeTab, setActiveTab] = useState<Tab>("contacts");
 
   const [userId, setUserId] = useState("");
@@ -47,7 +50,6 @@ export default function ContactsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
 
   // Load the logged-in user.
   const loadUser = useCallback(async () => {
@@ -69,8 +71,6 @@ export default function ContactsScreen() {
   // Load contacts and requests.
   const loadData = useCallback(async () => {
     try {
-      setMessage("");
-
       const currentUserId = userId || (await loadUser());
 
       const { data, error } = await supabase
@@ -144,12 +144,17 @@ export default function ContactsScreen() {
       setContacts(connectedContacts);
     } catch (error: any) {
       console.error("Contacts loading error:", error.message);
-      setMessage(error.message || "Unable to load contacts.");
+
+      showAlert({
+        title: "Couldn't load contacts",
+        message: error.message || "Please try again.",
+        variant: "error",
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId, loadUser]);
+  }, [userId, loadUser, showAlert]);
 
   useEffect(() => {
     loadData();
@@ -197,6 +202,12 @@ export default function ContactsScreen() {
 
         if (active) {
           setSearchResults([]);
+
+          showAlert({
+            title: "Search failed",
+            message: error.message || "Unable to search for people.",
+            variant: "error",
+          });
         }
       } finally {
         if (active) setSearchLoading(false);
@@ -207,12 +218,11 @@ export default function ContactsScreen() {
       active = false;
       clearTimeout(timer);
     };
-  }, [search, modalVisible, userId, loadUser]);
+  }, [search, modalVisible, userId, loadUser, showAlert]);
 
   // Send a connection request.
   const sendRequest = async (targetId: string) => {
     setActionLoading(targetId);
-    setMessage("");
 
     try {
       const { error } = await supabase.rpc("send_friend_request", {
@@ -221,10 +231,19 @@ export default function ContactsScreen() {
 
       if (error) throw error;
 
-      setMessage("Connection request sent successfully.");
+      showAlert({
+        title: "Request sent!",
+        message: "Your connection request has been sent successfully.",
+        variant: "success",
+      });
+
       await loadData();
     } catch (error: any) {
-      setMessage(error.message || "Unable to send request.");
+      showAlert({
+        title: "Couldn't send request",
+        message: error.message || "Unable to send connection request.",
+        variant: "error",
+      });
     } finally {
       setActionLoading(null);
     }
@@ -238,7 +257,6 @@ export default function ContactsScreen() {
     const actionKey = `${requestId}:${action}`;
 
     setActionLoading(actionKey);
-    setMessage("");
 
     try {
       const { error } = await supabase.rpc(
@@ -250,15 +268,22 @@ export default function ContactsScreen() {
 
       if (error) throw error;
 
-      setMessage(
-        action === "accept"
-          ? "Connection request accepted."
-          : "Connection request rejected.",
-      );
+      showAlert({
+        title: action === "accept" ? "You're connected!" : "Request rejected",
+        message:
+          action === "accept"
+            ? "You are now connected."
+            : "The connection request has been rejected.",
+        variant: action === "accept" ? "success" : "info",
+      });
 
       await loadData();
     } catch (error: any) {
-      setMessage(error.message || "Unable to update request.");
+      showAlert({
+        title: "Couldn't update request",
+        message: error.message || "Unable to update connection request.",
+        variant: "error",
+      });
     } finally {
       setActionLoading(null);
     }
@@ -267,7 +292,6 @@ export default function ContactsScreen() {
   // Cancel an outgoing request.
   const cancelRequest = async (requestId: string) => {
     setActionLoading(requestId);
-    setMessage("");
 
     try {
       const { error } = await supabase.rpc("cancel_friend_request", {
@@ -276,10 +300,19 @@ export default function ContactsScreen() {
 
       if (error) throw error;
 
-      setMessage("Request cancelled.");
+      showAlert({
+        title: "Request cancelled",
+        message: "Your outgoing connection request has been cancelled.",
+        variant: "info",
+      });
+
       await loadData();
     } catch (error: any) {
-      setMessage(error.message || "Unable to cancel request.");
+      showAlert({
+        title: "Couldn't cancel request",
+        message: error.message || "Unable to cancel connection request.",
+        variant: "error",
+      });
     } finally {
       setActionLoading(null);
     }
@@ -395,7 +428,6 @@ export default function ContactsScreen() {
             onPress={() => {
               setSearch("");
               setSearchResults([]);
-              setMessage("");
               setModalVisible(true);
             }}
           >
@@ -449,12 +481,6 @@ export default function ContactsScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-
-        {!!message && (
-          <View style={styles.messageBox}>
-            <Text style={styles.messageText}>{message}</Text>
-          </View>
-        )}
 
         {loading ? (
           <ActivityIndicator
@@ -716,6 +742,8 @@ export default function ContactsScreen() {
           )}
         </View>
       </Modal>
+
+      {alertNode}
     </View>
   );
 }
@@ -799,18 +827,6 @@ const styles = StyleSheet.create({
   },
   activeTabText: {
     color: COLORS.accent,
-  },
-  messageBox: {
-    backgroundColor: COLORS.card,
-    borderColor: COLORS.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 14,
-  },
-  messageText: {
-    color: COLORS.accent,
-    fontSize: 12,
   },
   sectionHeader: {
     flexDirection: "row",

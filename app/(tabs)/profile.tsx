@@ -4,7 +4,6 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,6 +15,7 @@ import {
   View,
 } from "react-native";
 
+import { useKnockAlert } from "../../components/KnockAlert";
 import { COLORS } from "../../constants/theme";
 import { supabase } from "../../lib/supabase";
 
@@ -49,6 +49,7 @@ const settings = [
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { showAlert, alertNode } = useKnockAlert();
 
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
@@ -63,12 +64,17 @@ export default function ProfileScreen() {
   const [editUsername, setEditUsername] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
 
-  const showMessage = (title: string, message: string) => {
-    if (Platform.OS === "web") {
-      window.alert(`${title}\n\n${message}`);
-    } else {
-      Alert.alert(title, message);
-    }
+  const showMessage = (
+    title: string,
+    message: string,
+    variant: "success" | "error" | "warning" | "info" = "info",
+  ) => {
+    showAlert({
+      title,
+      message,
+      variant,
+      buttonLabel: "Got it",
+    });
   };
 
   const loadProfile = async () => {
@@ -102,7 +108,7 @@ export default function ProfileScreen() {
     } catch (error: any) {
       console.error("Profile loading error:", error.message);
 
-      showMessage("Error", "Unable to load your account details.");
+      showMessage("Error", "Unable to load your account details.", "error");
     } finally {
       setLoading(false);
     }
@@ -128,6 +134,7 @@ export default function ProfileScreen() {
       showMessage(
         "Invalid name",
         "Your name must contain between 2 and 60 characters.",
+        "warning",
       );
       return;
     }
@@ -136,6 +143,7 @@ export default function ProfileScreen() {
       showMessage(
         "Invalid username",
         "Username must be 3–20 characters and contain only lowercase letters, numbers, and underscores.",
+        "warning",
       );
       return;
     }
@@ -166,6 +174,7 @@ export default function ProfileScreen() {
         showMessage(
           "Username unavailable",
           "This username is already taken. Please choose another one.",
+          "warning",
         );
         return;
       }
@@ -198,6 +207,7 @@ export default function ProfileScreen() {
       showMessage(
         "Profile updated",
         "Your profile has been updated successfully.",
+        "success",
       );
     } catch (error: any) {
       console.error("Profile update error:", error);
@@ -205,6 +215,7 @@ export default function ProfileScreen() {
       showMessage(
         "Update failed",
         error.message || "Unable to update your profile. Please try again.",
+        "error",
       );
     } finally {
       setSavingProfile(false);
@@ -234,30 +245,24 @@ export default function ProfileScreen() {
       const message =
         error instanceof Error ? error.message : "Please try again.";
 
-      showMessage("Couldn't sign out", message);
+      showMessage("Couldn't sign out", message, "error");
       setSigningOut(false);
     }
   };
 
   const confirmLogout = () => {
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm(
-        "Are you sure you want to sign out of Knock?",
-      );
+    if (signingOut) return;
 
-      if (confirmed) handleLogout();
-
-      return;
-    }
-
-    Alert.alert("Sign out", "Are you sure you want to sign out of Knock?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign out",
-        style: "destructive",
-        onPress: handleLogout,
+    showAlert({
+      title: "Sign out?",
+      message: "Are you sure you want to sign out of Knock?",
+      variant: "warning",
+      buttonLabel: "Sign out",
+      dismissOnBackdrop: false,
+      onDone: () => {
+        void handleLogout();
       },
-    ]);
+    });
   };
 
   const openSettings = (
@@ -469,6 +474,9 @@ export default function ProfileScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Reusable Knock Alert */}
+      {alertNode}
     </>
   );
 }
